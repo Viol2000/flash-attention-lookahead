@@ -127,6 +127,11 @@ struct Flash_fwd_params : public Qkv_params {
     bool is_rotary_interleaved;
 
     int num_splits;  // For split-KV version
+
+    int window;
+    int level;
+    int guess;
+    int kv_cache;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////

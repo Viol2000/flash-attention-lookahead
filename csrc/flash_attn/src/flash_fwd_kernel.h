@@ -890,6 +890,11 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         }
     }
 
+    const int window = params.window;
+    const int level = params.level;
+    const int guess = params.guess;
+    const int kv_cache = params.kv_cache;
+
     int n_block = n_block_max - 1;
     // We don't need to clear the sK smem tiles since we'll mask out the scores anyway.
     flash::copy<Is_even_MN, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV,
@@ -914,6 +919,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     constexpr int n_masking_steps = (!Is_causal && !Is_local)
         ? 1
         : ((Is_even_MN && Is_causal) ? cute::ceil_div(kBlockM, kBlockN) : cute::ceil_div(kBlockM, kBlockN) + 1);
+
     #pragma unroll
     for (int masking_step = 0; masking_step < n_masking_steps; ++masking_step, --n_block) {
         Tensor acc_s = partition_fragment_C(tiled_mma, Shape<Int<kBlockM>, Int<kBlockN>>{});  // (MMA=4, MMA_M, MMA_N)
@@ -946,13 +952,22 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         // for rows outside actual_seqlen_k. So those rows could have Inf / NaN, and the matmul
         // can produce Inf / NaN.
         if (!Is_causal && !Is_local) {
-            if (!Is_even_MN) { flash::apply_mask(scores, binfo.actual_seqlen_k - n_block * kBlockN); }
+            if (!Is_even_MN) { 
+                flash::apply_mask(scores, binfo.actual_seqlen_k - n_block * kBlockN); }
         } else {
+            if (window == 0)
             flash::apply_mask_local(scores, n_block * kBlockN, binfo.actual_seqlen_k,
                                     m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
                                     binfo.actual_seqlen_q, kNWarps * 16,
                                     params.window_size_left, params.window_size_right
                                     );
+            else flash::apply_mask_lookahead(scores, n_block * kBlockN, binfo.actual_seqlen_k,
+                                    m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
+                                    binfo.actual_seqlen_q, kNWarps * 16,
+                                    params.window_size_left, params.window_size_right,
+                                    window, level, guess, kv_cache
+                                    );
+
         }
 
         flash::cp_async_wait<0>();
@@ -1026,6 +1041,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
                 binfo.actual_seqlen_q, kNWarps * 16,
                 params.window_size_left, params.window_size_right
+            );
+        }
+        if (window != 0) {
+            flash::apply_mask_lookahead(
+                scores, n_block * kBlockN, binfo.actual_seqlen_k,
+                m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
+                binfo.actual_seqlen_q, kNWarps * 16,
+                params.window_size_left, params.window_size_right,
+                window, level, guess, kv_cache
             );
         }
         softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);

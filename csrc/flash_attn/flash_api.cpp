@@ -41,7 +41,11 @@ void set_params_fprop(Flash_fwd_params &params,
                       float p_dropout,
                       float softmax_scale,
                       int window_size_left,
-                      int window_size_right) {
+                      int window_size_right,
+                      int window = 0,
+                      int level = 0,
+                      int guess = 0,
+                      int kv_cache = 0) {
 
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -116,6 +120,11 @@ void set_params_fprop(Flash_fwd_params &params,
     params.window_size_right = window_size_right;
 
     params.is_seqlens_k_cumulative = true;
+
+    params.window = window;
+    params.level = level;
+    params.guess = guess;
+    params.kv_cache = kv_cache;
 }
 
 void set_params_dgrad(Flash_bwd_params &params,
@@ -194,7 +203,7 @@ void set_params_dgrad(Flash_bwd_params &params,
 void run_mha_fwd(Flash_fwd_params &params, cudaStream_t stream, bool force_split_kernel=false) {
     FP16_SWITCH(!params.is_bf16, [&] {
         FWD_HEADDIM_SWITCH(params.d, [&] {
-            if (params.num_splits <= 1 && !force_split_kernel) {  // If we don't set it num_splits == 0
+            if (params.num_splits <= 1 && !force_split_kernel && false) {  // If we don't set it num_splits == 0
                 run_mha_fwd_<elem_type, kHeadDim>(params, stream);
             } else {
                 run_mha_fwd_splitkv_dispatch<elem_type, kHeadDim>(params, stream);
@@ -253,6 +262,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         const float p_dropout,
         const float softmax_scale,
         bool is_causal,
+        std::vector<int> lookahead, 
         const int window_size_left,
         int window_size_right,
         const bool return_softmax,
@@ -368,7 +378,11 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
                      p_dropout,
                      softmax_scale,
                      window_size_left,
-                     window_size_right);
+                     window_size_right,
+                     lookahead[0],
+                     lookahead[1],
+                     lookahead[2],
+                     lookahead[3]);
 
     // This needs to match with run_mha_fwd_splitkv_dispatch
     const int block_n = head_size <= 64 ? 256 : (head_size <= 128 ? 128 : 64);

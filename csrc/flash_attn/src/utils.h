@@ -289,6 +289,47 @@ void cp_async_wait() {
 template <bool Is_even_MN=true, bool Is_even_K=true, bool Clear_OOB_MN=false, bool Clear_OOB_K=true,
           typename TiledCopy, typename Engine0, typename Layout0, typename Engine1, typename Layout1,
           typename Engine2, typename Layout2, typename Engine3, typename Layout3>
+inline __device__ void copy_lookahead(TiledCopy tiled_copy, Tensor<Engine0, Layout0> const &S,
+                            Tensor<Engine1, Layout1> &D, Tensor<Engine2, Layout2> const &identity_MN,
+                            Tensor<Engine3, Layout3> const &predicate_K, const int max_MN=0,
+                            const int window = 0, const int level=0, const int guess=0, const int kv_cache=0, 
+                            const int col_abs=0, const int row_abs=0) {
+    CUTE_STATIC_ASSERT_V(rank(S) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(rank(D) == Int<3>{});
+    CUTE_STATIC_ASSERT_V(size<0>(S) == size<0>(D));                     // MMA
+    CUTE_STATIC_ASSERT_V(size<1>(S) == size<1>(D));                     // MMA_M
+    CUTE_STATIC_ASSERT_V(size<2>(S) == size<2>(D));                     // MMA_K
+    // There's no case where !Clear_OOB_K && Clear_OOB_MN
+    static_assert(!(Clear_OOB_MN && !Clear_OOB_K));
+    int wl = window * (level - 1);
+    int col_left_set = row_abs < wl? window: 0;
+    int col_right_set = row_abs < wl? window + (row_abs - window) / (level - 2) * (level -  2) : row_abs / (level - 1) * (level - 1);
+    #pragma unroll
+    for (int m = 0; m < size<1>(S); ++m) {
+        int rel_col = get<0>(identity_MN(0, m, 0));
+        int causal_col = rel_col + col_abs - kv_cache;
+        
+        if (Is_even_MN || (rel_col < max_MN && (causal_col <= col_left_set || causal_col >= col_right_set))) {
+            #pragma unroll
+            for (int k = 0; k < size<2>(S); ++k) {
+                if (Is_even_K || predicate_K(k)) {
+                    cute::copy(tiled_copy, S(_, m, k), D(_, m, k));
+                } else if (Clear_OOB_K) {
+                    cute::clear(D(_, m, k));
+                }
+            }
+        } else if (Clear_OOB_MN) {
+            cute::clear(D(_, m, _));
+        }
+    }
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <bool Is_even_MN=true, bool Is_even_K=true, bool Clear_OOB_MN=false, bool Clear_OOB_K=true,
+          typename TiledCopy, typename Engine0, typename Layout0, typename Engine1, typename Layout1,
+          typename Engine2, typename Layout2, typename Engine3, typename Layout3>
 inline __device__ void copy(TiledCopy tiled_copy, Tensor<Engine0, Layout0> const &S,
                             Tensor<Engine1, Layout1> &D, Tensor<Engine2, Layout2> const &identity_MN,
                             Tensor<Engine3, Layout3> const &predicate_K, const int max_MN=0) {

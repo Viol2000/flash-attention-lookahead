@@ -41,7 +41,7 @@ def _get_block_size(device, head_dim, is_dropout, is_causal):
         return (128, 64) if is_sm80 else (64, 64)
 
 
-def _flash_attn_forward(q, k, v, dropout_p, softmax_scale, causal, window_size, return_softmax):
+def _flash_attn_forward(q, k, v, dropout_p, softmax_scale, causal, lookahead, window_size, return_softmax):
     maybe_contiguous = lambda x: x.contiguous() if x.stride(-1) != 1 else x
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = flash_attn_cuda.fwd(
@@ -52,6 +52,7 @@ def _flash_attn_forward(q, k, v, dropout_p, softmax_scale, causal, window_size, 
         dropout_p,
         softmax_scale,
         causal,
+        lookahead,
         window_size[0],
         window_size[1],
         return_softmax,
@@ -428,7 +429,7 @@ class FlashAttnVarlenKVPackedFunc(torch.autograd.Function):
 
 class FlashAttnFunc(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q, k, v, dropout_p, softmax_scale, causal, window_size, return_softmax):
+    def forward(ctx, q, k, v, dropout_p, softmax_scale, causal, lookahead, window_size, return_softmax):
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
         out, q, k, v, out_padded, softmax_lse, S_dmask, rng_state = _flash_attn_forward(
@@ -438,6 +439,7 @@ class FlashAttnFunc(torch.autograd.Function):
             dropout_p,
             softmax_scale,
             causal=causal,
+            lookahead=lookahead,
             window_size=window_size,
             return_softmax=return_softmax and dropout_p > 0,
         )
@@ -471,7 +473,7 @@ class FlashAttnFunc(torch.autograd.Function):
         dq = dq[..., : dout.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : dout.shape[-1]]
         dv = dv[..., : dout.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
 
 
 class FlashAttnVarlenFunc(torch.autograd.Function):
@@ -656,6 +658,7 @@ def flash_attn_func(
     dropout_p=0.0,
     softmax_scale=None,
     causal=False,
+    lookahead=[0,0,0,0],
     window_size=(-1, -1),  # -1 means infinite context window
     return_attn_probs=False,
 ):
@@ -703,7 +706,7 @@ def flash_attn_func(
             pattern (negative means that location was dropped, nonnegative means it was kept).
     """
     return FlashAttnFunc.apply(
-        q, k, v, dropout_p, softmax_scale, causal, window_size, return_attn_probs
+        q, k, v, dropout_p, softmax_scale, causal, lookahead, window_size, return_attn_probs
     )
 
 
