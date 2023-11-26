@@ -658,7 +658,7 @@ def flash_attn_func(
     dropout_p=0.0,
     softmax_scale=None,
     causal=False,
-    lookahead=[0,0,0,0,0],
+    lookahead=[0,0,0,0,0,0,0], #W, N, G, kv_cache_len, fill_offset, guess_offset
     window_size=(-1, -1),  # -1 means infinite context window
     return_attn_probs=False,
 ):

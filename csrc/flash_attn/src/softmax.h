@@ -144,7 +144,7 @@ inline __device__ void apply_mask_lookahead(Tensor<Engine, Layout> &tensor, cons
                                         const int max_seqlen_k, const int row_idx_offset_,
                                         const int max_seqlen_q, const int warp_row_stride,
                                         const int window_size_left, const int window_size_right,
-                                        const int window, const int level, const int guess, const int kv_cache) {
+                                        const int window, const int level, const int guess, const int kv_cache, const int fill_offset, const int guess_offset) {
     // tensor has shape (ncol=(2, MMA_M), nrow=(2, MMA_N))
     static_assert(Layout::rank == 2, "Only support 2D Tensor");
     const int lane_id = threadIdx.x % 32;
@@ -152,7 +152,7 @@ inline __device__ void apply_mask_lookahead(Tensor<Engine, Layout> &tensor, cons
     const int row_idx_offset = row_idx_offset_;
     const int col_idx_offset = col_idx_offset_ + (lane_id % 4) * 2;
     bool max_col_sub_kv_cache = col_idx_offset + (size<1, 1>(tensor) - 1) * 8 + size<1, 0>(tensor) - 1 > kv_cache;
-    int wl = window * (level - 1);
+    int wl = window * (level - 1) + fill_offset;
     #pragma unroll
     for (int mi = 0; mi < size<0, 1>(tensor); ++mi) {
 
@@ -168,11 +168,12 @@ inline __device__ void apply_mask_lookahead(Tensor<Engine, Layout> &tensor, cons
             int col_right_set = kv_cache;
             if (max_col_sub_kv_cache){
                 if (row_idx < wl) {
-                    const int div = (row_idx - window) / (level - 2);
-                    col_left_set = col_left_set + div;
-                    col_right_set = col_right_set + window + div * (level - 2);
+                    const int div = (row_idx - window - fill_offset) / (level - 2);
+                    col_left_set = col_left_set + div + fill_offset;
+                    col_right_set = kv_cache + window + div * (level - 2) + fill_offset;
                 } else {
-                    col_right_set = col_right_set + row_idx - row_idx % (level - 1);
+                    col_left_set = kv_cache + guess_offset;
+                    col_right_set = kv_cache + row_idx - (row_idx - wl) % (level - 1);
                 }
             }
 
@@ -183,8 +184,8 @@ inline __device__ void apply_mask_lookahead(Tensor<Engine, Layout> &tensor, cons
                 for (int j = 0; j < size<1, 0>(tensor); ++j) {
                     const int col_idx = col_idx_base + j;
                     //CUTE_LOG("visit: %d %d; %d %d %d\n", row_idx, col_idx, col_left_set, col_right_set, max_col_sub_kv_cache);
-                    if (col_idx >= col_idx_limit_right || (HasWSLeft && col_idx < col_idx_limit_left) || (col_idx > col_left_set && col_idx < col_right_set && row_idx >= window)) {
-                        //CUTE_LOG("mask %d %d\n", row_idx, col_idx);
+                    if (col_idx >= col_idx_limit_right || (HasWSLeft && col_idx < col_idx_limit_left) || (col_idx > col_left_set && col_idx < col_right_set && row_idx >= window + fill_offset)) {
+                        //CUTE_LOG("mask: %d %d\n", row_idx, col_idx);
                         tensor(make_coord(i, mi), make_coord(j, nj)) = -INFINITY;
                     }
 

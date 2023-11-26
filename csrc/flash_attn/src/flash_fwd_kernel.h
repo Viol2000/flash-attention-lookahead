@@ -894,6 +894,8 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     const int level = params.level;
     const int guess = params.guess;
     const int kv_cache = params.kv_cache;
+    const int fill_offset = params.fill_offset;
+    const int guess_offset = params.guess_offset;
     const bool skip = params.skip;
 
     int n_block = n_block_max - 1;
@@ -989,7 +991,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                                     m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
                                     binfo.actual_seqlen_q, kNWarps * 16,
                                     params.window_size_left, params.window_size_right,
-                                    window, level, guess, kv_cache
+                                    window, level, guess, kv_cache, fill_offset, guess_offset
                                     );
 
         }
@@ -1087,7 +1089,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
                 binfo.actual_seqlen_q, kNWarps * 16,
                 params.window_size_left, params.window_size_right,
-                window, level, guess, kv_cache
+                window, level, guess, kv_cache, fill_offset, guess_offset
             );
         }
         softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local || Is_causal>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);

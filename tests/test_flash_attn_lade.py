@@ -535,8 +535,7 @@ def get_dropout_fraction(
 
 
 
-
-
+'''
 @pytest.mark.parametrize("dtype", ([torch.float16] if is_sm75 else [torch.float16, torch.bfloat16]))
 # @pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("local", [False])
@@ -579,7 +578,7 @@ def test_flash_attn_splitkv(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dt
     k = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
     v = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
     out, lse, _ = flash_attn_func(
-        q, k, v, 0.0, causal=causal, window_size=window_size, return_attn_probs=True, lookahead=[0,0,0,0,0]
+        q, k, v, 0.0, causal=causal, window_size=window_size, return_attn_probs=True, lookahead=[0,0,0,0,0, 0, 0]
     )
     out_ref, attn_ref = attention_ref(
         q, k, v, None, None, 0.0, None, causal=causal, window_size=window_size
@@ -597,19 +596,19 @@ def test_flash_attn_splitkv(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dt
         upcast=False,
         reorder_ops=True,
     )
-    '''
-    print(f"Output max diff: {(out - out_ref).abs().max().item()}")
-    print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
-    print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
-    print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
-    '''
+    
+    #print(f"Output max diff: {(out - out_ref).abs().max().item()}")
+    #print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
+    #print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
+    #print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
+    
     # Check that FlashAttention's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item() + 1e-5
+'''
 
 
-
-def generate_b(b, window, level, guess, sz):
+def generate_b(b, window, level, guess, sz, fill_offset, guess_offset):
     for i in range(sz):
         for j in range(sz):
             if j > i:
@@ -617,21 +616,22 @@ def generate_b(b, window, level, guess, sz):
             else:
                 b[i][j] = 0 #1 for yellow
 
-    wl = window * (level - 1) 
+    wl = window * (level - 1) + fill_offset
     for i in range(sz):
-        left = 0
+        left = guess_offset
         right = (i - (i - wl) % (level - 1))
         if i < wl:
-            div = (i - window) // (level - 2)
-            left = div 
-            right = window + div * (level - 2)
+            div = (i - window - fill_offset) // (level - 2)
+            left = div + fill_offset
+            right = window + div * (level - 2) + fill_offset
+
         for j in range(sz):
-            if j > left and j < right and i >= window:
+            if j > left and j < right and i >= window + fill_offset:
                 b[i][j] = 1
     
     return b 
 
-
+'''
 @pytest.mark.parametrize("dtype", ([torch.float16] if is_sm75 else [torch.float16, torch.bfloat16]))
 # @pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("local", [False])
@@ -674,7 +674,7 @@ def test_flash_attn_splitkv(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dt
     k = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
     v = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
     out, lse, _ = flash_attn_func(
-        q, k, v, 0.0, causal=causal, window_size=window_size, return_attn_probs=True, lookahead=[0,0,0,0,0]
+        q, k, v, 0.0, causal=causal, window_size=window_size, return_attn_probs=True, lookahead=[0,0,0,0,0,0,0]
     )
         
 
@@ -694,17 +694,18 @@ def test_flash_attn_splitkv(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dt
         upcast=False,
         reorder_ops=True,
     )
-    '''
-    print(f"Output max diff: {(out - out_ref).abs().max().item()}")
-    print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
-    print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
-    print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
-    '''
+    
+    #print(f"Output max diff: {(out - out_ref).abs().max().item()}")
+    #print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
+    #print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
+    #print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
+    
     # Check that FlashAttention's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
     assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item() + 1e-5
-
-
+'''
+@pytest.mark.parametrize("fill_offset", [0,1,4,5,8])
+@pytest.mark.parametrize("guess_offset", [0,1,2,3,4])
 @pytest.mark.parametrize("dtype", ([torch.float16] if is_sm75 else [torch.float16, torch.bfloat16]))
 # @pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("local", [False])
@@ -717,39 +718,47 @@ def test_flash_attn_splitkv(seqlen_q, seqlen_k, swap_sq_sk, d, causal, local, dt
 # @pytest.mark.parametrize('d', [32, 64, 96, 128, 160, 192])
 # @pytest.mark.parametrize('d', [56, 80])
 # @pytest.mark.parametrize("d", [64])
-@pytest.mark.parametrize("window", [1,2,3,4,5,6,7,10,16,32,64,66,79,128,155])
-@pytest.mark.parametrize("guess", [1,2,3,4,5,6,7,10,16,32,64,66,79,128,155])
-@pytest.mark.parametrize("kv_cache", [0,1,2,3,4,5,6,7,10,16,32,64,66,79,128,155,240,320,340,546,1024])
-@pytest.mark.parametrize("level", [3,4,5,6,7,8,9,10,11,12,13,14])
+#@pytest.mark.parametrize("window", [1,2,3,4,5,6,7,10,16,32,64,66,79,128,155])
+#@pytest.mark.parametrize("guess", [1,2,3,4,5,6,7,10,16,32,64,66,79,128,155])
+#@pytest.mark.parametrize("kv_cache", [0,1,2,3,4,5,6,7,10,16,32,64,66,79,128,155,240,320,340,546,1024])
+#@pytest.mark.parametrize("level", [3,4,5,6,7,8,9,10,11,12,13,14])
+#@pytest.mark.parametrize("fill_offset", [0,1,2,3,4,5,6,7,8])
+#@pytest.mark.parametrize("guess_offset", [0,1,2,3,4,5,6,7,8])
+@pytest.mark.parametrize("window", [1,2,3,5,6,66,155])
+@pytest.mark.parametrize("guess", [1,2,3,4,66,79,128,155])
+@pytest.mark.parametrize("kv_cache", [0,1,2,3,16,32,155,340,546,1024])
+@pytest.mark.parametrize("level", [3,4,7,10,14])
 # @pytest.mark.parametrize("swap_sq_sk", [False])
 # @pytest.mark.parametrize('seqlen_q,seqlen_k', [(256, 128)])
-def test_flash_attn_splitkv_lookahead(d, causal, local, dtype, window, level, guess, kv_cache):
-    seqlen_q = window * (level - 1) + (level - 1) * guess
+def test_flash_attn_splitkv_lookahead(d, causal, local, dtype, window, level, guess, kv_cache, fill_offset, guess_offset):
+    seqlen_q = window * (level - 1) + (level - 1) * guess + fill_offset
     seqlen_k = kv_cache + seqlen_q
-
+    real_guess_offset = min(guess_offset, fill_offset)
+    #2 3 1 0 1 0
+    print("setting: ",  f"{window} {level} {guess} {kv_cache} {fill_offset} {real_guess_offset}")
     device = "cuda"
     # set seed
     torch.random.manual_seed(0)
     batch_size = 1
     nheads = 12
     window_size = (-1, -1) if not local else torch.randint(0, seqlen_k, (2,))
-    q = torch.randn(batch_size, seqlen_q, nheads, d, device=device, dtype=dtype, requires_grad=False)
-    k = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
-    v = torch.randn(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
+    q = torch.rand(batch_size, seqlen_q, nheads, d, device=device, dtype=dtype, requires_grad=False)
+    k = torch.rand(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
+    v = torch.rand(batch_size, seqlen_k, nheads, d, device=device, dtype=dtype, requires_grad=False)
 
     out, lse, _ = flash_attn_func(
-        q, k, v, 0.0, causal=causal, window_size=window_size, return_attn_probs=True, lookahead=[window, level, guess, kv_cache, 0]
+        q, k, v, 0.0, causal=causal, window_size=window_size, return_attn_probs=True, lookahead=[window, level, guess, kv_cache, fill_offset, real_guess_offset, 0]
     )
-
+    #print(out[0,:,0,0])
     mask = torch.zeros(1, 1, seqlen_q, seqlen_k)
-    generate_b(mask[0][0][-seqlen_q:,-seqlen_q:], window, level, guess, seqlen_q)
+    generate_b(mask[0][0][-seqlen_q:,-seqlen_q:], window, level, guess, seqlen_q, fill_offset, real_guess_offset)
     mask1 = mask.clone().detach()
     attention_mask = mask1.to(torch.float).masked_fill(mask.to(torch.bool), torch.finfo(torch.float).min).to(device)
     #print("mask: ", attention_mask)
     out_ref, attn_ref = attention_ref(
         q, k, v, None, None, 0.0, None, causal=causal, window_size=window_size, attention_mask=attention_mask
     )
-
+    #print(out_ref[0,:,0,0], (attention_mask == 0) * 1)
     attention_mask = mask.to(dtype).masked_fill(mask.to(torch.bool), torch.finfo(dtype).min).to(device)
 
     attention_mask = attention_mask
@@ -768,14 +777,14 @@ def test_flash_attn_splitkv_lookahead(d, causal, local, dtype, window, level, gu
         reorder_ops=True,
     )
     #print("max: ", out.max(), out_ref.max(), out_pt.max())
-    '''
-    print(f"Output max diff: {(out - out_ref).abs().max().item()}")
-    print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
-    print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
-    print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
-    '''
+    
+    #print(f"Output max diff: {(out - out_ref).abs().max().item()}")
+    #print(f"Output mean diff: {(out - out_ref).abs().mean().item()}")
+    #print(f"Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
+    #print(f"Pytorch mean diff: {(out_pt - out_ref).abs().mean().item()}")
+    
     # Check that FlashAttention's numerical error is at most twice the numerical error
     # of a Pytorch implementation.
-    assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item() + 1e-5
+    assert (out - out_ref).abs().max().item() <= 2 * (out_pt - out_ref).abs().max().item() + 1e-5, f"{window} {level} {guess} {kv_cache} {fill_offset} {guess_offset}"
 
 

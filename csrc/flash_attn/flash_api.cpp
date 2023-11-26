@@ -46,6 +46,8 @@ void set_params_fprop(Flash_fwd_params &params,
                       int level = 0,
                       int guess = 0,
                       int kv_cache = 0,
+                      int fill_offset = 0,
+                      int guess_offset = 0,
                       int skip = 0) {
 
     // Reset the parameters
@@ -126,6 +128,8 @@ void set_params_fprop(Flash_fwd_params &params,
     params.level = level;
     params.guess = guess;
     params.kv_cache = kv_cache;
+    params.fill_offset = fill_offset;
+    params.guess_offset = guess_offset;
     params.skip = skip;
 }
 
@@ -385,7 +389,9 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
                      lookahead[1],
                      lookahead[2],
                      lookahead[3],
-                     lookahead[4]);
+                     lookahead[4],
+                     lookahead[5],
+                     lookahead[6]);
 
     // This needs to match with run_mha_fwd_splitkv_dispatch
     const int block_n = head_size <= 64 ? 256 : (head_size <= 128 ? 128 : 64);

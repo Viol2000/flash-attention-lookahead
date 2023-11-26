@@ -132,6 +132,8 @@ struct Flash_fwd_params : public Qkv_params {
     int level;
     int guess;
     int kv_cache;
+    int fill_offset;
+    int guess_offset;
     int skip;
 };
 
