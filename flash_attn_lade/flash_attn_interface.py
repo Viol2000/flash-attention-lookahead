@@ -5,7 +5,7 @@ import torch.nn as nn
 
 # isort: off
 # We need to import the CUDA kernels after importing torch
-import flash_attn_2_cuda as flash_attn_cuda
+import flash_attn_lade_2_cuda as flash_attn_cuda
 
 # isort: on
 
@@ -658,7 +658,7 @@ def flash_attn_func(
     dropout_p=0.0,
     softmax_scale=None,
     causal=False,
-    lookahead=[0,0,0,0],
+    lookahead=[0,0,0,0,0],
     window_size=(-1, -1),  # -1 means infinite context window
     return_attn_probs=False,
 ):

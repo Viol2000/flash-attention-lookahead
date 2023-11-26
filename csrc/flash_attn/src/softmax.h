@@ -182,8 +182,9 @@ inline __device__ void apply_mask_lookahead(Tensor<Engine, Layout> &tensor, cons
                 #pragma unroll
                 for (int j = 0; j < size<1, 0>(tensor); ++j) {
                     const int col_idx = col_idx_base + j;
-                    //print("visit: %d %d %d %d\n", row_idx, col_idx, max_seqlen_q, max_seqlen_k);
+                    //CUTE_LOG("visit: %d %d; %d %d %d\n", row_idx, col_idx, col_left_set, col_right_set, max_col_sub_kv_cache);
                     if (col_idx >= col_idx_limit_right || (HasWSLeft && col_idx < col_idx_limit_left) || (col_idx > col_left_set && col_idx < col_right_set && row_idx >= window)) {
+                        //CUTE_LOG("mask %d %d\n", row_idx, col_idx);
                         tensor(make_coord(i, mi), make_coord(j, nj)) = -INFINITY;
                     }
 

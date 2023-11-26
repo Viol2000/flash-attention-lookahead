@@ -894,11 +894,26 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     const int level = params.level;
     const int guess = params.guess;
     const int kv_cache = params.kv_cache;
+    const bool skip = params.skip;
 
     int n_block = n_block_max - 1;
+    int col_left_set = 0;
+    int col_right_set = 0;
+    int row_abs = m_block * kBlockM;
     // We don't need to clear the sK smem tiles since we'll mask out the scores anyway.
+    if(skip){
+    int wl = window * (level - 1);
+    
+    col_left_set = row_abs < wl? window - 1: 0;
+    col_right_set = row_abs < wl? row_abs - (row_abs - window) % (level -  2) : row_abs -  row_abs % (level - 1);
+    int nblockN = n_block * kBlockN;
+
+    flash::copy_lookahead<Is_even_MN, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV,
+                                       binfo.actual_seqlen_k - nblockN, col_left_set, col_right_set,nblockN - kv_cache, row_abs);
+    }else {
     flash::copy<Is_even_MN, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV,
                                        binfo.actual_seqlen_k - n_block * kBlockN);
+    }
     cute::cp_async_fence();
 
     // flash::cp_async_wait<0>();
@@ -930,12 +945,21 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         // Advance gV
         if (masking_step > 0) {
             tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
-            flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV);
+            if(skip){
+                flash::copy_lookahead</*Is_even_MN=*/true, Is_even_K, true>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV, 0, col_left_set, col_right_set, n_block * kBlockN - kv_cache, row_abs);
+            } else{
+                flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV);
+            }
         } else {
             // Clear the smem tiles to account for predicated off loads
+            if(skip){
+                int nblockN = n_block * kBlockN;
+                flash::copy_lookahead<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
+                gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV, binfo.actual_seqlen_k - nblockN, col_left_set, col_right_set, nblockN - kv_cache, row_abs);
+            }else{
             flash::copy<Is_even_MN, Is_even_K, /*Clear_OOB_MN=*/true>(
                 gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV, binfo.actual_seqlen_k - n_block * kBlockN
-            );
+            );}
         }
         cute::cp_async_fence();
 
@@ -978,7 +1002,12 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         if (n_block > n_block_min) {
             // Advance gK
             tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+            if(skip){
+                flash::copy_lookahead</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV, 0, col_left_set, col_right_set, (n_block -1 )* kBlockN- kv_cache, row_abs);
+            }
+            else {
             flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV);
+            }
             // This cp_async_fence needs to be in the if block, otherwise the synchronization
             // isn't right and we get race conditions.
             cute::cp_async_fence();
@@ -1014,7 +1043,11 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         __syncthreads();
         // Advance gV
         tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
+        if(skip){
+        flash::copy_lookahead</*Is_even_MN=*/true, Is_even_K, true>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV, 0, col_left_set, col_right_set, n_block * kBlockN - kv_cache, row_abs);
+        }else{
         flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV);
+        }
         cute::cp_async_fence();
 
         flash::gemm(
@@ -1027,7 +1060,12 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         if (n_block > n_block_min) {
             // Advance gK
             tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+                    if(skip){
+                        flash::copy_lookahead</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV,0 ,col_left_set, col_right_set, (n_block-1) * kBlockN - kv_cache, row_abs);
+                    }
+            else{
             flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV);
+            }
             // This cp_async_fence needs to be in the if block, otherwise the synchronization
             // isn't right and we get race conditions.
             cute::cp_async_fence();
@@ -1052,7 +1090,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
                 window, level, guess, kv_cache
             );
         }
-        softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);
+        softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local || Is_causal>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);
 
         Tensor rP = flash::convert_type<Element>(scores);
         // Reshape rP from (nrow=(2, MMA_M), ncol=(2, MMA_N)) to ((2, 2, 2), MMA_M, MMA_N / 2)
@@ -1263,7 +1301,9 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
     // For the case where all local lse == -INFINITY, we want to set lse_logsum to INFINITY. Otherwise
     // lse_logsum is log(0.0) = -INFINITY and we get NaN when we do lse_accum(l) - lse_logsum.
     ElementAccum lse_logsum = (lse_sum == 0.f || lse_sum != lse_sum) ? INFINITY : logf(lse_sum) + lse_max;
-    // if (bidx == 0 && tidx < 32) { printf("tidx = %d, lse = %f, lse_max = %f, lse_logsum = %f\n", tidx, lse_accum(0), lse_max, lse_logsum); }
+    
+    //printf("tidx = %d, lse = %f, lse_max = %f, lse_logsum = %f\n", tidx, lse_accum(0), lse_max, lse_logsum);
+
     if (tidx % kRowsPerLoadTranspose == 0 && tidx / kRowsPerLoadTranspose < kBlockM) { gLSE(tidx / kRowsPerLoadTranspose) = lse_logsum; }
     // Store the scales exp(lse - lse_logsum) in shared memory.
     #pragma unroll

@@ -45,7 +45,8 @@ void set_params_fprop(Flash_fwd_params &params,
                       int window = 0,
                       int level = 0,
                       int guess = 0,
-                      int kv_cache = 0) {
+                      int kv_cache = 0,
+                      int skip = 0) {
 
     // Reset the parameters
     memset(&params, 0, sizeof(params));
@@ -125,6 +126,7 @@ void set_params_fprop(Flash_fwd_params &params,
     params.level = level;
     params.guess = guess;
     params.kv_cache = kv_cache;
+    params.skip = skip;
 }
 
 void set_params_dgrad(Flash_bwd_params &params,
@@ -267,7 +269,7 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         int window_size_right,
         const bool return_softmax,
         c10::optional<at::Generator> gen_) {
-
+    //freopen("tmp.txt", "w", stdout); 
     auto dprops = at::cuda::getCurrentDeviceProperties();
     // bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
     bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
@@ -382,7 +384,8 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
                      lookahead[0],
                      lookahead[1],
                      lookahead[2],
-                     lookahead[3]);
+                     lookahead[3],
+                     lookahead[4]);
 
     // This needs to match with run_mha_fwd_splitkv_dispatch
     const int block_n = head_size <= 64 ? 256 : (head_size <= 128 ? 128 : 64);
@@ -434,6 +437,9 @@ mha_fwd(at::Tensor &q,         // batch_size x seqlen_q x num_heads x head_size
         q_padded = q_padded.transpose(1, 2).reshape({batch_size, 1, num_heads_k * seqlen_q, head_size_og});
         softmax_lse = softmax_lse.reshape({batch_size, num_heads_k * seqlen_q, 1});
     }
+    //cudaDeviceSynchronize();
+    //freopen("/dev/tty","w",stdout);
+
     return {out, q_padded, k_padded, v_padded, out_padded, softmax_lse, p, rng_state};
 }
 
@@ -600,15 +606,15 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream, const bool configure) {
     FP16_SWITCH(!params.is_bf16, [&] {
-        if (params.d <= 32) {
+      /*  if (params.d <= 32) {
             run_mha_bwd_<elem_type, 32>(params, stream, configure);
         } else if (params.d <= 64) {
             run_mha_bwd_<elem_type, 64>(params, stream, configure);
         } else if (params.d <= 96) {
-            run_mha_bwd_<elem_type, 96>(params, stream, configure);
-        } else if (params.d <= 128) {
+            run_mha_bwd_<elem_type, 96>(params, stream, configure);*/
+     //   } else if (params.d <= 128) {
             run_mha_bwd_<elem_type, 128>(params, stream, configure);
-        } else if (params.d <= 160) {
+      /*  } else if (params.d <= 160) {
             run_mha_bwd_<elem_type, 160>(params, stream, configure);
         } else if (params.d <= 192) {
             run_mha_bwd_<elem_type, 192>(params, stream, configure);
@@ -616,7 +622,7 @@ void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream, const bool confi
           run_mha_bwd_<elem_type, 224>(params, stream, configure);
         } else if (params.d <= 256) {
           run_mha_bwd_<elem_type, 256>(params, stream, configure);
-        }
+        }*/
     });
 }
 
